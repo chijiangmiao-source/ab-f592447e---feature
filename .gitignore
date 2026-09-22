@@ -12,3 +12,4 @@ __pycache__/
 *.pyo
 .verify
 dist
+.npm-cache/

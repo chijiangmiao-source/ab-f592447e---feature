@@ -47,9 +47,29 @@ export interface ParsedModel {
   top: string;
 }
 
+/** 事件行第二字段（独立失效概率）的解析状态；缺失等同于旧的“仅标识”格式。 */
+export type ProbabilityStatus = 'missing' | 'valid' | 'invalid';
+
+export interface EventFieldInfo {
+  /** 在基本事件文本中的行号（1 起） */
+  line: number;
+  /** 行首标识原文（可能非法，非法时 nameValid=false） */
+  name: string;
+  nameValid: boolean;
+  /** 概率字段原文（trim 后）；缺失为 '' */
+  probRaw: string;
+  probStatus: ProbabilityStatus;
+  /** 非法时的人类可读原因 */
+  probReason?: string;
+  /** 有效概率的分子，分母固定为 1_000_000（六位小数） */
+  probNumerator?: bigint;
+}
+
 export interface ParseResult {
   model: ParsedModel;
   issues: Issue[];
+  /** 每个非空事件行的字段解析信息（含概率字段）；不影响定性分析的合法性判定。 */
+  eventFields: EventFieldInfo[];
 }
 
 export type EventRole = 'mandatory' | 'optional' | 'irrelevant';
@@ -81,3 +101,42 @@ export interface InvalidAnalysis {
 }
 
 export type Analysis = CompleteAnalysis | LimitedAnalysis | InvalidAnalysis;
+
+/** 精确有理数值（BigInt）及其有限十进制表示（分母只含因子 2、5，十进制必然终止）。 */
+export interface ProbValue {
+  numerator: bigint;
+  denominator: bigint;
+  /** 精确十进制字符串（不含指数，去掉尾随零） */
+  decimal: string;
+}
+
+export interface ProbabilityProblem {
+  line: number;
+  name: string;
+  raw: string;
+  kind: 'missing' | 'invalid';
+  reason?: string;
+}
+
+export interface EventQuantitative {
+  event: string;
+  line: number;
+  /** 用户输入的概率原文 */
+  input: string;
+  p: ProbValue;
+  /** 强制该事件“未发生”后的顶事件条件概率 P(T|e=0) */
+  absent: ProbValue;
+  /** 强制该事件“已发生”后的顶事件条件概率 P(T|e=1) */
+  present: ProbValue;
+  /** 差值 P(T|e=1) − P(T|e=0)（单调故障树中非负） */
+  delta: ProbValue;
+  /** 精确一致性：P(T) = (1−p)·P(T|e=0) + p·P(T|e=1) */
+  identityHolds: boolean;
+  /** 精确偏序：P(T|e=0) ≤ P(T) ≤ P(T|e=1) */
+  orderHolds: boolean;
+}
+
+export type QuantitativeResult =
+  | { status: 'quant_ok'; top: ProbValue; events: EventQuantitative[]; nodes: number }
+  | { status: 'quantitative_limit'; limit: number; nodes: number }
+  | { status: 'prob_invalid'; problems: ProbabilityProblem[] };

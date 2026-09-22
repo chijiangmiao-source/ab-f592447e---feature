@@ -180,3 +180,73 @@ code {
 .muted { color: var(--muted); }
 
 h3 { font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+
+/* ---- 概率缺失（非阻断）提示 ---- */
+.panel-warn { border-color: #6b531a; }
+.line-tags-warn { color: var(--warn); }
+.line-tag-warn { background: #3a2f16; }
+
+/* ---- 事件选择与割集联动 ---- */
+.select-info { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 8px; }
+.cutset-hit {
+  background: #142f24;
+  border-bottom: 1px solid #1e4d38;
+  border-radius: 4px;
+}
+.cutset-hit code { background: #1d4d38; }
+.cutset-dim { opacity: 0.32; }
+.event-picked { outline: 2px solid var(--ok); }
+
+.chip-btn {
+  margin: 0 4px 4px 0;
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+.chip-picked {
+  background: #1d4d38 !important;
+  border-color: var(--ok);
+  color: #c9ffe6;
+}
+.row-selected { background: #13241d; }
+
+.mini-btn {
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.small { font-size: 11px; }
+
+/* ---- 定量复核 ---- */
+.quant-block { margin-top: 8px; }
+.quant-banner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.quant-banner p { margin: 6px 0 0; }
+.quant-banner-warn { background: #33270f; border: 1px solid #6b531a; }
+.quant-banner-limit { background: #2e1a1a; border: 1px solid #7a3a3a; }
+
+.top-prob {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #10231b;
+  border: 1px solid #1e4d38;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+}
+.top-prob-label { font-size: 13px; color: var(--muted); }
+.top-prob-value { font-size: 18px; color: var(--ok); background: transparent; padding: 0; }
+
+.quant-table td, .quant-table th { vertical-align: top; }
+.quant-table .dec { white-space: nowrap; }
+
+.consistency-panel { border-color: #1e4d38; }
+.consistency-panel li { margin: 4px 0; }

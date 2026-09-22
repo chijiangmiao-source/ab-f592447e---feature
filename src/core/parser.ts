@@ -1,15 +1,51 @@
-import type { Gate, Issue, ParseResult } from './types';
+import type { EventFieldInfo, Gate, Issue, ParseResult, ProbabilityStatus } from './types';
 
 export const MIN_EVENTS = 2;
 export const MAX_EVENTS = 30;
 export const MIN_GATES = 1;
 export const MAX_GATES = 80;
 
+/** 独立失效概率分母：输入只接受至多六位小数，故概率精确值为 n / 1_000_000。 */
+export const PROBABILITY_DENOMINATOR = 1_000_000n;
+
 // 唯一 ASCII 标识：字母/下划线开头，后接字母数字下划线；'#' 起始为注释。
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+// 0–1 的十进制、至多六位小数：
+// 接受 0 / 1 / 0.5 / .5 / 0.500000 / 1.000000；
+// 拒绝符号、科学计数法、多余前导零、“0.” 空小数、超过六位小数与越界值。
+const PROBABILITY = /^(?:0|1|0?\.\d{1,6}|1\.0{1,6})$/;
+
 export function isValidIdentifier(token: string): boolean {
   return IDENTIFIER.test(token);
+}
+
+/**
+ * 解析概率字段原文为精确有理数（分母固定 1_000_000）。
+ * 缺失（空串）按旧的“仅标识”格式处理，不构成错误；这里只判定非法与否。
+ */
+export function parseProbability(raw: string): {
+  status: ProbabilityStatus;
+  numerator?: bigint;
+  reason?: string;
+} {
+  if (raw === '') return { status: 'missing' };
+  if (!PROBABILITY.test(raw)) {
+    let reason = '概率须为 0–1 的十进制数且至多六位小数（如 0.01、.5、1.000000）';
+    if (/^[+-]?\d+(\.\d+)?$/.test(raw) && !Number.isNaN(Number(raw))) {
+      const n = Number(raw);
+      if (n < 0 || n > 1) reason = '概率须在闭区间 [0, 1] 内';
+      else if (raw.includes('.') && raw.split('.')[1].length > 6) reason = '概率至多保留六位小数';
+    }
+    return { status: 'invalid', reason };
+  }
+  const dot = raw.indexOf('.');
+  const intPart = dot >= 0 ? raw.slice(0, dot) : raw;
+  const frac = dot >= 0 ? raw.slice(dot + 1) : '';
+  const numerator =
+    BigInt(intPart === '' ? 0 : intPart) * PROBABILITY_DENOMINATOR +
+    BigInt((frac + '000000').slice(0, 6));
+  return { status: 'valid', numerator };
 }
 
 function stripComment(line: string): string {
@@ -18,20 +54,48 @@ function stripComment(line: string): string {
 }
 
 /**
- * 解析基本事件文本：每行一个标识，空行/注释允许。
+ * 解析基本事件文本：每行一个标识，可选第二字段填写独立失效概率，
+ * 空行/注释允许。旧的“仅标识”行视为概率缺失——不影响定性分析，
+ * 仅在全部割集已得出后阻止定量结论。
  * 保留非法行与重复行用于错误定位，不抛异常。
  */
-export function parseEvents(text: string): { events: string[]; issues: Issue[] } {
+export function parseEvents(text: string): {
+  events: string[];
+  issues: Issue[];
+  fields: EventFieldInfo[];
+} {
   const issues: Issue[] = [];
   const seen = new Map<string, number>();
   const events: string[] = [];
+  const fields: EventFieldInfo[] = [];
 
   text.split(/\r?\n/).forEach((raw, idx) => {
     const lineNo = idx + 1;
     const token = stripComment(raw).trim();
     if (!token) return;
 
-    if (!isValidIdentifier(token)) {
+    const parts = token.split(/\s+/);
+    const name = parts[0];
+    const nameValid = isValidIdentifier(name);
+    const probRaw = parts.length >= 2 ? parts[1] : '';
+    let prob = parseProbability(probRaw);
+
+    // 两个以上字段：除“概率本身非法”外，额外字段本身也是格式错误。
+    if (parts.length > 2 && prob.status !== 'invalid') {
+      prob = { status: 'invalid', reason: '每行至多包含“标识”与“概率”两个字段（# 之后为注释）' };
+    }
+
+    fields.push({
+      line: lineNo,
+      name,
+      nameValid,
+      probRaw,
+      probStatus: prob.status,
+      probReason: prob.reason,
+      probNumerator: prob.numerator
+    });
+
+    if (!nameValid) {
       issues.push({
         code: 'bad_identifier',
         message: `“${raw.trim()}” 不是合法 ASCII 标识（字母/下划线开头，仅含字母数字下划线）`,
@@ -39,16 +103,16 @@ export function parseEvents(text: string): { events: string[]; issues: Issue[] }
       });
       return;
     }
-    if (seen.has(token)) {
+    if (seen.has(name)) {
       issues.push({
         code: 'duplicate_event',
-        message: `基本事件 ${token} 重复定义（首次出现于第 ${seen.get(token)} 行）`,
-        location: { area: 'events', line: lineNo, token }
+        message: `基本事件 ${name} 重复定义（首次出现于第 ${seen.get(name)} 行）`,
+        location: { area: 'events', line: lineNo, token: name }
       });
       return;
     }
-    seen.set(token, lineNo);
-    events.push(token);
+    seen.set(name, lineNo);
+    events.push(name);
   });
 
   if (issues.length === 0 && (events.length < MIN_EVENTS || events.length > MAX_EVENTS)) {
@@ -58,7 +122,7 @@ export function parseEvents(text: string): { events: string[]; issues: Issue[] }
       location: { area: 'events' }
     });
   }
-  return { events, issues };
+  return { events, issues, fields };
 }
 
 /**
@@ -164,8 +228,12 @@ export function parseTop(text: string): { top: string; issues: Issue[] } {
 }
 
 export function parseModel(eventsText: string, gatesText: string, topText: string): ParseResult {
-  const { events, issues: eIssues } = parseEvents(eventsText);
+  const { events, issues: eIssues, fields } = parseEvents(eventsText);
   const { gates, issues: gIssues } = parseGates(gatesText);
   const { top, issues: tIssues } = parseTop(topText);
-  return { model: { events, gates, top }, issues: [...eIssues, ...gIssues, ...tIssues] };
+  return {
+    model: { events, gates, top },
+    issues: [...eIssues, ...gIssues, ...tIssues],
+    eventFields: fields
+  };
 }
